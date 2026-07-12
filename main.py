@@ -22,6 +22,18 @@ BOHR_TO_ANGSTROM = 0.529177210903
 # =============================================================================
 @dataclass(frozen=True)
 class DuoLevel:
+    """
+    Class Attributes:
+    system: str - e- state identifier
+    v: int - vib quantum number
+    J: float - total angular momentum number
+    Omega: float - J projection on the molecular axis
+    Sigma: float - spin projection onto the molecular axis
+    Lambda: float - e- orbital angular momentum projection onto the molecular axis
+    parity: int - parity of the rovibrational level, either +1 or -1
+    duo_index: int - inside DUO index identification
+    energy: float - energy of the rovibrational level in cm-1 
+    """
     system: str
     v: int
     J: float
@@ -37,6 +49,14 @@ class DuoLevel:
 # =============================================================================
 @dataclass(frozen=True)
 class CoeffComponent:
+    """
+    Class Attributes: 
+    coeff: complex - rot level coefficient in the rovib basis
+    v_basis: int - #vibrational level in the basis
+    Lambda: float - e- orbital angular momentum projection onto the molecular axis
+    Sigma: float - spin projection onto the molecular axis
+    Omega: float - J projection onto the molecular axis
+    """
     coeff: complex
     v_basis: int
     Lambda: float
@@ -47,14 +67,34 @@ class CoeffComponent:
 # Small utilities
 # =============================================================================
 
-# Change to list-type variable 
 def as_list(x):
+    """
+    Params: 
+    x: int, list, tuple or np.ndarray
+    Returns: 
+    x: list
+    """
     if isinstance(x, (list, tuple, np.ndarray)):
         return list(x)
     return [x]
 
 # Resolve system path and file. Check with directory and prefix-directory.
 def resolve_system_file(base_path, system, filename):
+    """
+    Locate system-specific style in directory and prefix conventions.
+
+    Params: 
+    base_path: str or Path - base directory of calculations
+    system: str - specifying directory
+    filename: str - file to locate
+    
+    Returns: 
+    Path: path - to the first matching file
+    
+    Raises: 
+    FileNotFoundError: If file cannot be found
+    """
+
     base_path = Path(base_path)
 
     candidate_dir = base_path / system / filename                                   # Look at directory style -> base/system_state/filename
@@ -96,6 +136,13 @@ def build_dyson_index_to_omega():
 # =============================================================================
 # Reading vibrational eigenfunctions: header
 def is_head_eigenvib(line: str) -> bool:
+    """
+    Params: 
+    line: str - line in eigenfunc file
+    Returns:
+    bool: T or F
+    """
+
     s = line.strip()
     if not s:
         return False
@@ -114,6 +161,21 @@ def is_head_eigenvib(line: str) -> bool:
 
 # Reading vibrational eigenfunctions: functions
 def parse_duo_vib_einfun(fname, npoints: int, nvib: int):
+    """
+    Read vibrational eigenfunctions from a DUO output file 
+
+    Input params: 
+    fname: str or Path - Path to the DUO output file
+    npoints: int - #radial-grid points per vibrational state
+    nvib: int - #vibrational states to read
+
+    Returns:
+    np.ndarray - matrix with (npoints,nvib), each column containing 
+                the WF of one vibrational state
+
+    Raises
+    ValueError - If a vibrational function has more than npoints
+    """
 
     fname = Path(fname)
     vibmat = np.zeros((npoints, nvib), dtype=float)
@@ -148,6 +210,18 @@ def parse_duo_vib_einfun(fname, npoints: int, nvib: int):
 
 # Reading rovibrational levels energies and quantum numbers
 def read_duo_levels(fname, system, nvib_max=None, j_max=None):
+    """
+    Reads the information of the rovibrational levels. 
+
+    Params: 
+    fname: str or Path - file containing the rovibrational levels information
+    system: str - state identification
+    nvib_max: int - max vib quantum number to be read
+    j_max: float - max J quantum number to be read
+
+    Returns: 
+    levels: list of DuoLevel objects
+    """
 
     fname = Path(fname)
     levels = []
@@ -188,6 +262,9 @@ def read_duo_levels(fname, system, nvib_max=None, j_max=None):
 
 # Creating dictionary keys for rovibrational levels
 def level_state_key(level):
+    """
+    From rovib level take coeff key
+    """
     return (
         level.J,
         level.parity,
@@ -196,6 +273,14 @@ def level_state_key(level):
 
 # Reading rovibrational basis coefficients in DUO format
 def read_coefficients(filename, debug_first_lines=0):
+    """
+    Params:
+    filename: str or Path - file containing rovib coeffs 
+    debug_first_lines: int - general info of the file
+
+    Returns: 
+    tmp: dict of CoeffComponent
+    """
 
     filename = Path(filename)
     tmp = defaultdict(list)
@@ -238,9 +323,10 @@ def read_coefficients(filename, debug_first_lines=0):
 
     return dict(tmp)
 
-# Brief diagnostic to check coefficients size, keys and orthonormality of coefficient basis
 def print_coeff_summary(coeffs, label):
-
+    """
+    Diagnostic of coeff components
+    """
     norms = []
     ncomps = []
     vmins = []
