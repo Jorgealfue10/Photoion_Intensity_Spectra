@@ -455,6 +455,16 @@ def W3_exp(J1, J2, J3, m1, m2, m3):
 
 # Reading dyson norms files for each pair of initial and final omega states
 def read_dyson_raw(d_neutral, d_cation, dyson_path, bohr_to_angstrom=True):
+    """
+    Params: 
+    d_neutral: list - lists of omega values for the neutral system
+    d_cation: list - lists of omega values for the cation system
+    dyson_path: str or Path - path to the r,omega-dependent dyson files
+    bohr_to_angstrom: boolean - change or not from bohr to angstrom
+
+    Returns:
+    raw: dict - dictionary containing the loaded dyson by Omega combinations
+    """
     dyson_path = Path(dyson_path)
     raw = {}
     r_ref = None
@@ -483,6 +493,14 @@ def read_dyson_raw(d_neutral, d_cation, dyson_path, bohr_to_angstrom=True):
 
 # Combination of dyson norms into a single magnitude for cummulative keys
 def combine_dyson_by_omega(raw, mode="quadrature"):
+    """
+    Params: 
+    raw: dict - dictionary of dyson values by all combination of omegas
+    mode: str - quadrature or sum, how to combine the dyson values
+
+    Returns: 
+    combined: dict - dyson norm values combined by same number of omega combination
+    """
     if mode not in ["quadrature", "sum"]:
         raise ValueError("mode must be 'quadrature' or 'sum'")
 
@@ -521,6 +539,15 @@ def combine_dyson_by_omega(raw, mode="quadrature"):
 # Interpolation of combined dyson norms as a function of X-Y atomic coordinate 
 # with the information coming from DUO outputs
 def make_dyson_splines(combined, spline_type="cubic", extrapolate=False):
+    """
+    Params:
+    combined: dict - combined dyson values
+    spline_type: str - cubic or lineal
+    extrapolate: boolean - go out R values of dyson
+
+    Returns:
+    splines: dict - Dyson splines for each omega combination
+    """
     if spline_type not in ["cubic", "linear"]:
         raise ValueError("spline_type must be 'cubic' or 'linear'")
 
@@ -564,9 +591,21 @@ def read_dyson_splines(d_neutral,d_cation,dyson_path,combine_mode="quadrature",s
 def rotational_factor_cached(J_i, J_f, Omega_i, Omega_f, K_values_tuple):
     """
     Wigner 3j explicit expression conditions of angular momenta combination: 
+    Conditions that have to be fulfilled
     1. |J_i - J_f| <= K <= J_i + J_f
     2. (J_i + J_f + K) % 1 == 0
     3. Omega_i + Omega_f - dOmega == 0
+    4. 
+
+    Params: 
+    J_i: int - neutral J value of the transition
+    J_f: int - cation J value of the transition
+    Omega_i: float - neutral Omega value
+    Omega_f: float - cation Omega value
+    K_values_tuple: tuple - DeltaJ and DeltaOmega values to be considered in the calculation
+
+    Returns: 
+    total: float - value containing the coupling of angular momenta with 3j-symbol coupling
     """
 
     total = 0.0
@@ -591,6 +630,20 @@ def rotational_factor(J_i, J_f, Omega_i, Omega_f, K_values):
 
 # Relative and absolute transition energies
 def transition_energy_Eh(level_i, level_f, ZPE_i_cm, ZPE_f_cm, Eelec_i_Eh, Eelec_f_Eh):
+    """
+    Params: 
+    level_i: DUOLevel - rovibrational level of neutral
+    level_f: DUOLevel - rovibrational level of cation
+    ZPE_i_cm: float - Neutral ZPE value in cm-1
+    ZPE_f_cm: float - Cation ZPE value in cm-1
+    Eelec_i_Eh: float - Neutral pot. E value in Eh
+    Eelec_f_Eh: float - Cation pot. E value in Eh
+
+    Returns: 
+    Ei_rel: float - Neutral rovibrational energy relative to neutral ZPE
+    Ef_rel: float - Cation rovibrational energy relative to cation ZPE
+    Ef_abs - Ei_abs: float - E difference between rovibrational levels
+    """
     Ei_rel = (level_i.energy_cm + ZPE_i_cm) / EH_TO_CM
     Ef_rel = (level_f.energy_cm + ZPE_f_cm) / EH_TO_CM
 
@@ -601,6 +654,14 @@ def transition_energy_Eh(level_i, level_f, ZPE_i_cm, ZPE_f_cm, Eelec_i_Eh, Eelec
 
 # Precomputing dyson values depending on the R grid
 def precompute_dyson_values(dyson_splines, r_use):
+    """
+    Params: 
+    dyson_splines: spline obj - dyson splines objects
+    r_use: list or np.ndarray - r grid to be used
+
+    Returns: 
+    dyson_values: dict - dyson values in r grid
+    """
     dyson_values = {}
 
     for key, spline in dyson_splines.items():
@@ -618,7 +679,18 @@ def precompute_dyson_values(dyson_splines, r_use):
 
 # Precomputing vibrational bra-ket matrices <vib_i | dyson | vib_f>
 def precompute_vibrational_bk_matrices(vib_neutral_use, vib_cation_use, dyson_splines, r_use, missing_dyson="skip"):
-    
+    """
+    Params: 
+    vib_neutral_use: list or np.ndarray - Neutral vibrational eigenfunctions
+    vib_cation_use: list or np.ndarray - Cation vibrational eigenfunctions
+    dyson_splines: list - Dyson splines
+    r_use: list - r grid
+    missin_dyson: str - what to do if there is no dyson 
+
+    Returns:
+    vib_bk_by_key: dict - dictionary containing every possible vibrational combination
+    """
+
     vib_bk_by_key = {}
 
     for keydyson, spline in dyson_splines.items():
@@ -643,8 +715,21 @@ def precompute_vibrational_bk_matrices(vib_neutral_use, vib_cation_use, dyson_sp
 def vibrational_dyson_bra_ket(vib_ini, vib_fin, dyson_values):
     return np.dot(vib_fin, dyson_values * vib_ini)
 
-def transition_amplitude_component_contraction(level_i,level_f,vib_bk_matrix,fc_matrix,
+def transition_amplitude_component_contraction(level_i,level_f,vib_bk_matrix,
                                             components_i,components_f,K_values):
+    """
+    Params: 
+    level_i: DUOLevel - neutral rovib level
+    level_f: DUOLevel - cation rovib level
+    vib_bk_matrix: list or np.ndarray - Dyson vibrational braket for specific omega combination
+    components_i: CoeffComponent - neutral rotational coefficient for the rovib level
+    components_f: CoeffComponent - cation rotational coefficient for the rovib level
+    K_values: list - DeltaJ values to be considered in transitions
+
+    Returns: 
+    matrix_element_coherent: list_complex - contains the transition in complex values
+    matrix_element_coherent_abs_sum: list_float - contains the abs value of the transition intensity
+    """
     
     bk_no_rotation = 0.0 + 0.0j
 
@@ -655,7 +740,9 @@ def transition_amplitude_component_contraction(level_i,level_f,vib_bk_matrix,fc_
     bk_component_coherent_abs_sum = 0.0
 
     K_values_tuple = tuple(K_values)
-
+    rot = rotational_factor_cached(level_i.J,level_f.J,level_i.Omega,level_f.Omega,K_values_tuple)
+    phase = minus_one_power(level_i.Omega) 
+    
     for comp_i in components_i:                                                                        # Sum over all rotational coefficients in the rovibrational basis
         for comp_f in components_f:
             coeff_factor = np.conj(comp_f.coeff) * comp_i.coeff
@@ -665,21 +752,33 @@ def transition_amplitude_component_contraction(level_i,level_f,vib_bk_matrix,fc_
 
             vib_dyson_comp = vib_bk_matrix[comp_f.v_basis, comp_i.v_basis]                             # Coherent rovibrational matrix element
 
-            rot = rotational_factor_cached(level_i.J,level_f.J,comp_i.Omega,comp_f.Omega,K_values_tuple)
-            phase = minus_one_power(comp_i.Omega)                                                              # Phase factor
-
-            coherent_term = phase * rot * coeff_factor * vib_dyson_comp
+            coherent_term = coeff_factor * vib_dyson_comp
             bk_component_coherent += coherent_term
             bk_component_coherent_abs_sum += abs(coherent_term)
 
-    matrix_element_coherent = bk_component_coherent
-    matrix_element_coherent_abs_sum = bk_component_coherent_abs_sum
+    matrix_element_coherent = phase*rot*bk_component_coherent
+    matrix_element_coherent_abs_sum = phase*rot*bk_component_coherent_abs_sum
 
     return (matrix_element_coherent,matrix_element_coherent_abs_sum)
 
-def trans_amp_coherentROT(level_i,level_f,vib_bk_matrix,fc_matrix,
-                                            components_i,components_f,K_values):
-    
+def trans_amp_coherentROT(level_i,level_f,vib_bk_matrix,
+                        components_i,components_f,K_values):
+    """
+    Same as transition_amplitude_component_contraction but W3j is inside the rovibrational basis sum
+
+    Params: 
+    level_i: DUOLevel - neutral rovib level
+    level_f: DUOLevel - cation rovib level
+    vib_bk_matrix: list or np.ndarray - Dyson vibrational braket for specific omega combination
+    components_i: CoeffComponent - neutral rotational coefficient for the rovib level
+    components_f: CoeffComponent - cation rotational coefficient for the rovib level
+    K_values: list - DeltaJ values to be considered in transitions
+
+    Returns: 
+    matrix_element_coherent: list_complex - contains the transition in complex values
+    matrix_element_coherent_abs_sum: list_float - contains the abs value of the transition intensity
+    """
+
     bk_no_rotation = 0.0 + 0.0j
 
     coeff_sum = 0.0 + 0.0j
@@ -716,13 +815,18 @@ def build_transition_table(levels_neutral,levels_cation,vib_neutral,vib_cation,c
                         rvals,mask,ZPE_neutral_cm,ZPE_cation_cm,Eelec_neutral_Eh,Eelec_cation_Eh,K_values,
                         missing_dyson="skip",missing_coeff="error",min_intensity=0.0,):
     
+    """
+    Params: 
+    
+    """
+    
     rows = []
 
     r_use = rvals[mask]
     vib_neutral_use = vib_neutral[mask, :]
     vib_cation_use = vib_cation[mask, :]
 
-    fc_matrix = vib_cation_use.T @ vib_neutral_use
+    # fc_matrix = vib_cation_use.T @ vib_neutral_use
 
     vib_bk_by_key = precompute_vibrational_bk_matrices(vib_neutral_use=vib_neutral_use, vib_cation_use=vib_cation_use,          # Vibrational matrix elements <vib_cation | dyson | vib_neutral>
                                                     dyson_splines=dyson_splines, r_use=r_use, missing_dyson=missing_dyson)
@@ -775,11 +879,11 @@ def build_transition_table(levels_neutral,levels_cation,vib_neutral,vib_cation,c
 
             vib_bk_matrix = vib_bk_by_key[keydyson]
 
-            # (matrix_element_coherent,matrix_element_coherent_abs_sum) = transition_amplitude_component_contraction(level_i=level_i, level_f=level_f, vib_bk_matrix=vib_bk_matrix, fc_matrix=fc_matrix, 
+            # (matrix_element_coherent,matrix_element_coherent_abs_sum) = transition_amplitude_component_contraction(level_i=level_i, level_f=level_f, vib_bk_matrix=vib_bk_matrix, 
             #                                             components_i=components_i, components_f=components_f, K_values=K_values)
 
             (matrix_element_coherent,matrix_element_coherent_abs_sum) = trans_amp_coherentROT(level_i=level_i, level_f=level_f, vib_bk_matrix=vib_bk_matrix, 
-                                                                        fc_matrix=fc_matrix, components_i=components_i, components_f=components_f, K_values=K_values)
+                                                                        components_i=components_i, components_f=components_f, K_values=K_values)
 
             rows.append(
                 { "v_i": level_i.v, "J_i": level_i.J, "Omega_i": level_i.Omega, "Sigma_i": level_i.Sigma, "Lambda_i": level_i.Lambda, "parity_i": level_i.parity, "index_i": level_i.duo_index,
