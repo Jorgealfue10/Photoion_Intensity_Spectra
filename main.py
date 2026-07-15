@@ -817,7 +817,24 @@ def build_transition_table(levels_neutral,levels_cation,vib_neutral,vib_cation,c
     
     """
     Params: 
-    
+    levels_neutral: list_DUOLevel - Neutral rovibrational levels
+    levels_cation: list_DUOLevel - Cation rovibrational levels
+    vib_neutral: list or np.ndarray - Neutral rovibrational eigenfunctions as a function of v_n and R
+    vib_cation: list or np.ndarray - cation rovibrational eigenfunctions as a function of v_n and R
+    coeff_neutral: list_Coeffelements - neutral rotational coefficients in the rovibrational basis
+    coeff_cation: list_Coeffelements - cation rotational coefficients in the rovibrational basis
+    dyson_splines: spline objs - Dyson splines objects as a combination of omegas
+    ZPE_neutral_cm: float - Neutral ZPE value in cm-1
+    ZPE_cation_cm: float - Cation ZPE value in cm-1
+    Eelec_neutral_Eh: float - Neutral Abs Pot E value in Eh
+    Eelec_cation_Eh: float - Cation Abs Pot E value in Eh
+    K_values: list - DeltaJ values to be considered
+    missing_dyson: str - skip or error
+    missing_coeff: str - skip or error
+    min_intensity: float - min intensity cutoff
+
+    Returns:
+    df: Pandas Dataframe - contains quantum number, energies and transition intensities for each rovibrational transition
     """
     
     rows = []
@@ -825,8 +842,6 @@ def build_transition_table(levels_neutral,levels_cation,vib_neutral,vib_cation,c
     r_use = rvals[mask]
     vib_neutral_use = vib_neutral[mask, :]
     vib_cation_use = vib_cation[mask, :]
-
-    # fc_matrix = vib_cation_use.T @ vib_neutral_use
 
     vib_bk_by_key = precompute_vibrational_bk_matrices(vib_neutral_use=vib_neutral_use, vib_cation_use=vib_cation_use,          # Vibrational matrix elements <vib_cation | dyson | vib_neutral>
                                                     dyson_splines=dyson_splines, r_use=r_use, missing_dyson=missing_dyson)
