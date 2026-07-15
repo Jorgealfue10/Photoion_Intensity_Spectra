@@ -665,28 +665,51 @@ def transition_amplitude_component_contraction(level_i,level_f,vib_bk_matrix,fc_
 
             vib_dyson_comp = vib_bk_matrix[comp_f.v_basis, comp_i.v_basis]                             # Coherent rovibrational matrix element
 
-            coherent_term = coeff_factor * vib_dyson_comp
+            rot = rotational_factor_cached(level_i.J,level_f.J,comp_i.Omega,comp_f.Omega,K_values_tuple)
+            phase = minus_one_power(comp_i.Omega)                                                              # Phase factor
+
+            coherent_term = phase * rot * coeff_factor * vib_dyson_comp
             bk_component_coherent += coherent_term
             bk_component_coherent_abs_sum += abs(coherent_term)
 
-    vib_dyson = vib_bk_matrix[level_f.v, level_i.v]                                                    # Incoherent rovibrational matrix element
-    fc_overlap = fc_matrix[level_f.v, level_i.v]
+    matrix_element_coherent = bk_component_coherent
+    matrix_element_coherent_abs_sum = bk_component_coherent_abs_sum
 
-    rot = rotational_factor_cached(level_i.J, level_f.J, level_i.Omega, level_f.Omega, K_values_tuple)
+    return (matrix_element_coherent,matrix_element_coherent_abs_sum)
 
-    phase = minus_one_power(level_i.Omega)                                                              # Phase factor
+def trans_amp_coherentROT(level_i,level_f,vib_bk_matrix,fc_matrix,
+                                            components_i,components_f,K_values):
+    
+    bk_no_rotation = 0.0 + 0.0j
 
-    bk_component = coeff_abs_sum * vib_dyson
-    bk_no_rotation = phase * bk_component
-    matrix_element = rot * bk_no_rotation
+    coeff_sum = 0.0 + 0.0j
+    coeff_abs_sum = 0.0
 
-    bk_no_rotation_coherent = phase * bk_component_coherent
-    matrix_element_coherent = rot * bk_no_rotation_coherent
+    bk_component_coherent = 0.0 + 0.0j
+    bk_component_coherent_abs_sum = 0.0
 
-    return (matrix_element,bk_no_rotation,coeff_sum,coeff_abs_sum,
-        vib_dyson,fc_overlap,bk_component,
-        matrix_element_coherent,bk_no_rotation_coherent,
-        bk_component_coherent,bk_component_coherent_abs_sum,)
+    K_values_tuple = tuple(K_values)
+
+    for comp_i in components_i:                                                                        # Sum over all rotational coefficients in the rovibrational basis
+        for comp_f in components_f:
+            coeff_factor = np.conj(comp_f.coeff) * comp_i.coeff
+
+            coeff_sum += coeff_factor
+            coeff_abs_sum += abs(coeff_factor)
+
+            vib_dyson_comp = vib_bk_matrix[comp_f.v_basis, comp_i.v_basis]                             # Coherent rovibrational matrix element
+
+            rot = rotational_factor_cached(level_i.J,level_f.J,comp_i.Omega,comp_f.Omega,K_values_tuple)
+            phase = minus_one_power(comp_i.Omega)                                                              # Phase factor
+
+            coherent_term = phase * rot * coeff_factor * vib_dyson_comp
+            bk_component_coherent += coherent_term
+            bk_component_coherent_abs_sum += abs(coherent_term)
+
+    matrix_element_coherent_abs_sum = bk_component_coherent_abs_sum
+    matrix_element_coherent = bk_component_coherent
+
+    return (matrix_element_coherent,matrix_element_coherent_abs_sum)
 
 # Building the transition table and gathering data
 def build_transition_table(levels_neutral,levels_cation,vib_neutral,vib_cation,coeff_neutral,coeff_cation,dyson_splines,
@@ -752,19 +775,18 @@ def build_transition_table(levels_neutral,levels_cation,vib_neutral,vib_cation,c
 
             vib_bk_matrix = vib_bk_by_key[keydyson]
 
-            (matrix_element, bk_no_rotation, coeff_sum, coeff_abs_sum, vib_dyson, fc_overlap, bk_component, 
-            matrix_element_coherent, bk_no_rotation_coherent, bk_component_coherent, bk_component_coherent_abs_sum
-            ) = transition_amplitude_component_contraction(level_i=level_i, level_f=level_f, vib_bk_matrix=vib_bk_matrix, fc_matrix=fc_matrix, 
-                                                        components_i=components_i, components_f=components_f, K_values=K_values)
+            # (matrix_element_coherent,matrix_element_coherent_abs_sum) = transition_amplitude_component_contraction(level_i=level_i, level_f=level_f, vib_bk_matrix=vib_bk_matrix, fc_matrix=fc_matrix, 
+            #                                             components_i=components_i, components_f=components_f, K_values=K_values)
 
-            matrix_abs = np.abs(matrix_element)
+            (matrix_element_coherent,matrix_element_coherent_abs_sum) = trans_amp_coherentROT(level_i=level_i, level_f=level_f, vib_bk_matrix=vib_bk_matrix, 
+                                                                        fc_matrix=fc_matrix, components_i=components_i, components_f=components_f, K_values=K_values)
 
             rows.append(
                 { "v_i": level_i.v, "J_i": level_i.J, "Omega_i": level_i.Omega, "Sigma_i": level_i.Sigma, "Lambda_i": level_i.Lambda, "parity_i": level_i.parity, "index_i": level_i.duo_index,
                 "v_f": level_f.v, "J_f": level_f.J, "Omega_f": level_f.Omega, "Sigma_f": level_f.Sigma, "Lambda_f": level_f.Lambda, "parity_f": level_f.parity, "index_f": level_f.duo_index,
                 "Ei_eV": Ei_rel_Eh * EH_TO_EV,"Ef_eV": Ef_rel_Eh * EH_TO_EV,"DeltaE_eV": DeltaE_Eh * EH_TO_EV,
-                "matrix_real": np.real(matrix_element),"matrix_imag": np.imag(matrix_element),"matrix_abs": matrix_abs,
                 "matrix_coh_real": np.real(matrix_element_coherent), "matrix_coh_imag": np.imag(matrix_element_coherent), "matrix_coh_abs": np.abs(matrix_element_coherent),
+                "matrix_coh_sum_abs": matrix_element_coherent_abs_sum,
                 "Delta_v": level_f.v - level_i.v, "Delta_J": level_f.J - level_i.J, "Delta_Omega": level_f.Omega - level_i.Omega,
                 }
             )
@@ -788,8 +810,7 @@ def dump_transition_table(df, filename):
         "v_i", "J_i", "Omega_i", "Sigma_i", "Lambda_i", "parity_i", "index_i",
         "v_f", "J_f", "Omega_f", "Sigma_f", "Lambda_f", "parity_f", "index_f",
         "Ei_eV", "Ef_eV", "DeltaE_eV",
-        "matrix_real", "matrix_imag", "matrix_abs",
-        "matrix_coh_real", "matrix_coh_imag", "matrix_coh_abs",
+        "matrix_coh_real", "matrix_coh_imag", "matrix_coh_abs","matrix_coh_sum_abs",
         "Delta_v", "Delta_J", "Delta_Omega",
     ]
 
