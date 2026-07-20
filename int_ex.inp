@@ -1,0 +1,22 @@
+# Mandatory arguments
+ZPE  1173.803740143267 1149.8           
+Etot -341.4992406252  -341.1257312537
+nVJtot 36 81 
+DJ 5.5
+Nvib 7 10
+NJ 10 15 
+maskR 0.793755 1.8  
+npts 10001 
+path ./ 
+dsys PH_GS_DAV/ PHM_GS_DAV/ 
+dypath ./Dyson_Comp/ 
+states PHX3Sm PHMX2P 
+output PHGS_PHMGS_DAV.out 
+
+#Optional arguments
+dyson-mode sum 
+spline cubic  
+missing-dyson skip 
+missing-coeff error 
+min-intensity 0.0
+
