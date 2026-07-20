@@ -2,12 +2,26 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 import matplotlib.pyplot as plt
+import argparse
 
-def read_transition_output_df(filepath,skiprows=1):
 
-    arr = np.loadtxt(filepath,skiprows=skiprows)
+def read_transition_output_df(filepath,skiprows=1,transition_cols=None):
 
-    df = pd.DataFrame(arr,columns=transition_cols)
+    if transition_cols is None:
+        transition_cols = [
+            "v_i", "J_i", "Omega_i", "Sigma_i", "Lambda_i", "parity_i", "index_i",
+            "v_f", "J_f", "Omega_f", "Sigma_f", "Lambda_f", "parity_f", "index_f",
+            "Ei_eV", "Ef_ev", "Delta_eV",
+            "matrix_coh_real", "matrix_coh_imag", "matrix_coh_abs", "matrix_coh_sum_abs",
+            "Delta_v", "Delta_J", "Delta_Omega",
+        ]
+
+    arr = np.loadtxt(filepath, skiprows=skiprows)
+
+    if arr.ndim == 1:
+        arr = arr[None, :]
+
+    df = pd.DataFrame(arr, columns=transition_cols)
 
     int_cols = [
         "v_i","index_i","v_f","index_f","Delta_v"
@@ -299,56 +313,490 @@ def write_conv_file_one_transition_temperature(output_file,conv,E_grid,
 
         np.savetxt(f,arr,fmt="%.10e")
 
-base_dir = Path("/home/jorgebdelafuente/Doctorado/Photoion/DUO/PHPHM")
+def get_initial_state_from_label(label):
+    if "->" not in label:
+        raise ValueError(f"Transition label does not contain '->': {label}")
+    return label.split("->")[0].strip()
 
-transition_cols = [
-    "v_i","J_i","Omega_i","Sigma_i","Lambda_i","parity_i","index_i",
-    "v_f","J_f","Omega_f","Sigma_f","Lambda_f","parity_f","index_f",
-    "Ei_eV","Ef_ev","Delta_eV",
-    "matrix_coh_real","matrix_coh_imag","matrix_coh_abs","matrix_coh_sum_abs",
-    "Delta_v","Delta_J","Delta_Omega"
-]
+def get_exp_max_in_range(exp_data, Emin, Emax, energy_col=0, intensity_col=3):
+    E = exp_data[:, energy_col]
+    I = exp_data[:, intensity_col]
+    mask = (E >= Emin) & (E <= Emax)
+    if not np.any(mask):
+        raise ValueError(f"No experimental points in range {Emin} - {Emax} eV")
 
-transition_files = {
-    "PHGS -> PHMGS": base_dir / "test.out"
-}
+    I_range = I[mask] ; E_range = E[mask]
+    imax = np.argmax(I_range)
+    Imax = I_range[imax] ; E_at_max = E_range[imax]
 
-transitions_df = {
-    label: read_transition_output_df(path,skiprows=1)
-    for label,path in transition_files.items()
-}
+    return Imax, E_at_max
 
-df = transitions_df["PHGS -> PHMGS"]
-E_min = df["Delta_eV"].min()
-E_max = df["Delta_eV"].max()
+def get_exp_max_by_state(exp_data, exp_ranges, energy_col=0, intensity_col=3):
+    exp_max = {}
 
-E_grid = np.linspace(E_min, E_max, 6000)
+    for state_label, (Emin, Emax) in exp_ranges.items():
+        Imax, E_at_max = get_exp_max_in_range(exp_data=exp_data,Emin=Emin,Emax=Emax,
+            energy_col=energy_col,intensity_col=intensity_col)
 
-Tvib_values = [5000]
-Trot_values = [100]
+        exp_max[state_label] = {"range": (Emin, Emax),
+            "Imax": Imax,"E_at_max": E_at_max}
 
-transition_label = "PHGS -> PHMGS"
-df = transitions_df[transition_label]
+    return exp_max
 
-sticks_temp, pop_temp = sticks_by_temp_df(df,Tvib_values=Tvib_values,Trot_values=Trot_values,
-                                        Ei_col="Ei_eV",vi_col="v_i",Ji_col="J_i",Omi_col="Omega_i",
-                                        intensity_cols=("matrix_coh_sum_abs",))
+def get_theory_total_by_state(conv_by_transition):
+    theory_total_by_state = {}
 
-conv_temp = {}
+    for transition_label, conv in conv_by_transition.items():
+        initial_state = get_initial_state_from_label(transition_label)
+        if initial_state not in theory_total_by_state:
+            theory_total_by_state[initial_state] = np.zeros_like(conv["spec"], dtype=float)
+        theory_total_by_state[initial_state] += conv["spec"]
 
-for (Tvib, Trot), df_T in sticks_temp.items():
+    return theory_total_by_state
 
-    conv_T = build_conv_df(df_T,E_grid,energy_col="Delta_eV",
-        intensity_col="matrix_coh_sum_abs_T",vi_col="v_i",sigma=0.015,
-        filters={
-            "Delta_J": lambda x: np.abs(x) <= 3.5
-        },normalize=False)
+def get_theory_max_by_state(conv_by_transition):
+    theory_total_by_state = get_theory_total_by_state(conv_by_transition)
 
-    conv_temp[(Tvib, Trot)] = conv_T
+    theory_max_by_state = {}
+    for initial_state, spec in theory_total_by_state.items():
+        theory_max_by_state[initial_state] = np.max(spec) if len(spec) > 0 else 0.0
+    return theory_max_by_state, theory_total_by_state
 
-    safe_label = safe_filename_label(transition_label)
+def get_scale_by_state(conv_by_transition, exp_max):
+    theory_max_by_state, theory_total_by_state = get_theory_max_by_state(conv_by_transition)
 
-    output_file = f"{safe_label}_Tvib{Tvib}_Trot{Trot}.dat"
+    scale_by_state = {}
+    for initial_state, theory_max in theory_max_by_state.items():
+        if initial_state not in exp_max:
+            raise KeyError(f"No experimental maximum found for initial state: {initial_state}")
 
-    write_conv_file_one_transition_temperature(output_file=output_file,conv=conv_T,E_grid=E_grid,
-        transition_label=transition_label,Tvib=Tvib,Trot=Trot)
+        exp_Imax = exp_max[initial_state]["Imax"]
+        if theory_max > 0.0:
+            scale_by_state[initial_state] = exp_Imax / theory_max
+        else:
+            scale_by_state[initial_state] = 0.0
+
+    return scale_by_state, theory_max_by_state, theory_total_by_state
+
+def add_state_normalization_to_convs(conv_by_transition, exp_max):
+    scale_by_state, theory_max_by_state, theory_total_by_state = get_scale_by_state(
+        conv_by_transition=conv_by_transition,exp_max=exp_max)
+
+    for transition_label, conv in conv_by_transition.items():
+        initial_state = get_initial_state_from_label(transition_label)
+        scale = scale_by_state[initial_state]
+
+        conv["initial_state"] = initial_state
+        conv["scale_state"] = scale
+        conv["spec_state_norm"] = conv["spec"] * scale
+        conv["by_vi_state_norm"] = {}
+
+        for vi, spec_vi in conv["by_vi"].items():
+            conv["by_vi_state_norm"][vi] = spec_vi * scale
+
+    return conv_by_transition, scale_by_state, theory_max_by_state, theory_total_by_state
+
+#============================================================================
+# Input file parser
+#============================================================================
+# Comments
+def strip_inline_comment(line):
+    stripped = line.strip()
+    if not stripped:
+        return ""
+    if stripped.startswith("#") or stripped.startswith("!"):
+        return ""
+    clean = line.split("#", 1)[0]
+    clean = clean.split("!", 1)[0]
+    return clean.strip()
+
+# ============================================================
+# Boolean parser
+# ============================================================
+def parse_bool(value):
+    value = str(value).strip().lower()
+    if value in ["true", "t", "yes", "y", "1", ".true."]:
+        return True
+    if value in ["false", "f", "no", "n", "0", ".false."]:
+        return False
+    raise ValueError(f"Cannot parse boolean value: {value}")
+
+# ============================================================
+# Generic parsers
+# ============================================================
+def parse_float_list(values):
+    return [float(v) for v in values]
+
+def parse_int_list(values):
+    return [int(v) for v in values]
+
+# ============================================================
+# Read input file
+# ============================================================
+def read_input_file(filename):
+    filename = Path(filename)
+    data = {}
+
+    with open(filename, "r") as f:
+        for iline, line in enumerate(f, start=1):
+            clean = strip_inline_comment(line)
+            if not clean:
+                continue
+            parts = clean.split()
+            key = parts[0].lower().replace("-", "_")
+            values = parts[1:]
+            if len(values) == 0:
+                raise ValueError(
+                    f"Missing value in input file {filename}, "
+                    f"line {iline}: {line.rstrip()}"
+                )
+            data[key] = values
+    return data
+
+# ============================================================
+# Access keywords
+# ============================================================
+def get_required(data, key):
+    key = key.lower().replace("-", "_")
+    if key not in data:
+        raise KeyError(f"Missing required input keyword: {key}")
+    return data[key]
+
+def get_optional(data, key, default):
+    key = key.lower().replace("-", "_")
+    return data.get(key, default)
+
+# ============================================================
+# Convert input dictionary to argparse.Namespace
+# ============================================================
+
+def input_data_to_namespace(data):
+    args = argparse.Namespace()
+
+    # General paths / dimensions
+    args.dir = Path(get_required(data, "base_dir")[0])
+    args.ntrans = int(get_required(data, "ntransitions")[0])
+    args.nsttN = int(get_required(data, "nsttsN")[0])
+    args.nsttC = int(get_required(data, "nsttsC")[0])
+    args.skiprows = int(get_optional(data, "skiprows", ["1"])[0])
+
+    # Transitions
+    args.transitions = {}
+    if args.ntrans == 1:
+        trans_name = " ".join(get_required(data, "trans_name"))
+        trans_file = get_required(data, "trans_file")[0]
+
+        args.transitions[trans_name] = trans_file
+
+    else:
+        for itrans in range(1, args.ntrans + 1):
+            name_key = f"trans_name_{itrans}"
+            file_key = f"trans_file_{itrans}"
+
+            trans_name = " ".join(get_required(data, name_key))
+            trans_file = get_required(data, file_key)[0]
+
+            args.transitions[trans_name] = trans_file
+
+    # Columns
+    args.energy_col = get_optional(data, "energy_col", ["Delta_eV"])[0]
+    args.Ei_col = get_optional(data, "Ei_col", ["Ei_eV"])[0]
+    args.vi_col = get_optional(data, "vi_col", ["v_i"])[0]
+    args.Ji_col = get_optional(data, "Ji_col", ["J_i"])[0]
+    args.Omi_col = get_optional(data, "Omega_i_col", ["Omega_i"])[0]
+    args.intensity_col = get_optional(
+        data,
+        "intensity_col",
+        ["matrix_coh_sum_abs"],
+    )[0]
+    args.intensity_col_T = args.intensity_col + "_T"
+
+    # Convolution parameters
+    args.sigma = float(get_optional(data, "sigma", ["0.025"])[0])
+    args.ngrid = int(get_optional(data, "ngrid", ["6000"])[0])
+    args.deltaJ_max = float(get_optional(data, "deltaJ_max", ["inf"])[0])
+    args.normalize = parse_bool(
+        get_optional(data, "normalize", ["false"])[0]
+    )
+
+    # --------------------------------------------------------
+    # Energy grid
+    # --------------------------------------------------------
+
+    args.use_exp_grid = parse_bool(
+        get_optional(data, "use_exp_grid", ["false"])[0]
+    )
+
+    args.energy_grid_mode = get_optional(
+        data,
+        "energy_grid_mode",
+        ["auto"],
+    )[0].lower()
+
+    if args.energy_grid_mode == "manual":
+        vals = get_required(data, "energy_range")
+        if len(vals) != 2:
+            raise ValueError("energy_range must have two values: Emin Emax")
+        args.energy_range = (
+            float(vals[0]),
+            float(vals[1]),
+        )
+    else:
+        args.energy_range = None
+
+    # --------------------------------------------------------
+    # Temperatures
+    # --------------------------------------------------------
+
+    args.Tvib_values = parse_float_list(
+        get_required(data, "Tvib_values")
+    )
+
+    args.Trot_values = parse_float_list(
+        get_required(data, "Trot_values")
+    )
+
+    # --------------------------------------------------------
+    # Experimental spectrum
+    # --------------------------------------------------------
+
+    args.read_exp = parse_bool(
+        get_optional(data, "read_exp", ["false"])[0]
+    )
+
+    args.state_labels = {}
+    args.exp_ranges = {}
+
+    if args.read_exp:
+        args.expdat = Path(get_required(data, "exp_esp")[0])
+        args.exp_skiprows = int(
+            get_optional(data, "exp_skiprows", ["3"])[0]
+        )
+        args.exp_energy_col = int(
+            get_optional(data, "exp_energy_col", ["0"])[0]
+        )
+        args.exp_intensity_col = int(
+            get_optional(data, "exp_intensity_col", ["3"])[0]
+        )
+
+        if args.nsttN == 1:
+            state_label = " ".join(
+                get_optional(data, "state_label", ["PHGS"])
+            )
+
+            vals = get_required(data, "exp_range")
+
+            if len(vals) != 2:
+                raise ValueError("exp_range must have two values: Emin Emax")
+
+            args.state_labels[1] = state_label
+
+            args.exp_ranges[state_label] = (
+                float(vals[0]),
+                float(vals[1]),
+            )
+
+        else:
+            for istate in range(1, args.nsttN + 1):
+                label_key = f"state_label_{istate}"
+                range_key = f"exp_range_{istate}"
+
+                state_label = " ".join(get_required(data, label_key))
+                vals = get_required(data, range_key)
+
+                if len(vals) != 2:
+                    raise ValueError(
+                        f"{range_key} must have two values: Emin Emax"
+                    )
+
+                args.state_labels[istate] = state_label
+                args.exp_ranges[state_label] = (
+                    float(vals[0]),
+                    float(vals[1]),
+                )
+    else:
+        args.expdat = None
+        args.exp_skiprows = None
+        args.exp_energy_col = None
+        args.exp_intensity_col = None
+        args.state_labels = None
+        args.exp_ranges = None
+
+    # --------------------------------------------------------
+    # Output
+    # --------------------------------------------------------
+
+    args.output_dir = Path(
+        get_optional(data, "output_dir", ["."])[0]
+    )
+
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+
+    return args
+    
+def main(input_file):
+
+    data = read_input_file(input_file)
+    args = input_data_to_namespace(data)
+
+    # ========================================================
+    # Read transition files
+    # ========================================================
+
+    transition_files = {
+        label: args.dir / filename
+        for label, filename in args.transitions.items()
+    }
+
+    transitions_df = {
+        label: read_transition_output_df(path, skiprows=args.skiprows)
+        for label, path in transition_files.items()
+    }
+
+    # ========================================================
+    # Read experimental spectrum
+    # ========================================================
+
+    if args.read_exp:
+
+        exp_data = np.loadtxt(args.expdat, skiprows=args.exp_skiprows)
+
+        exp_max = get_exp_max_by_state(exp_data=exp_data,exp_ranges=args.exp_ranges,
+            energy_col=args.exp_energy_col,intensity_col=args.exp_intensity_col)
+
+    else:
+
+        exp_data = None
+        exp_max = None
+
+    # ========================================================
+    # Energy grid
+    # ========================================================
+
+    if args.energy_grid_mode == "manual":
+
+        E_min, E_max = args.energy_range
+
+    elif args.use_exp_grid and args.read_exp:
+
+        E_exp = exp_data[:, args.exp_energy_col]
+
+        E_min = E_exp.min()
+        E_max = E_exp.max()
+
+    else:
+
+        E_min = min(
+            df[args.energy_col].min()
+            for df in transitions_df.values()
+        )
+
+        E_max = max(
+            df[args.energy_col].max()
+            for df in transitions_df.values()
+        )
+
+    E_grid = np.linspace(E_min, E_max, args.ngrid)
+
+    # ========================================================
+    # Filters
+    # ========================================================
+
+    if np.isinf(args.deltaJ_max):
+        filters = None
+    else:
+        filters = {
+            "Delta_J": lambda x: np.abs(x) <= args.deltaJ_max
+        }
+
+    # ========================================================
+    # Main loop
+    # ========================================================
+
+    all_sticks_temp = {}
+    all_pop_temp = {}
+    all_conv_temp = {}
+    all_scale_by_state = {}
+    all_theory_max_by_state = {}
+    all_theory_total_by_state = {}
+
+    for Tvib in args.Tvib_values:
+        for Trot in args.Trot_values:
+            temp_key = (Tvib, Trot)
+
+            all_conv_temp[temp_key] = {}
+            all_sticks_temp[temp_key] = {}
+            all_pop_temp[temp_key] = {}
+
+            # ------------------------------------------------
+            # Build all convolutions for this temperature
+            # ------------------------------------------------
+            for transition_label, df in transitions_df.items():
+                sticks_temp, pop_temp = sticks_by_temp_df(df,Tvib_values=[Tvib],Trot_values=[Trot],
+                    Ei_col=args.Ei_col,vi_col=args.vi_col,Ji_col=args.Ji_col,Omi_col=args.Omi_col,
+                    intensity_cols=(args.intensity_col,))
+
+                df_T = sticks_temp[temp_key]
+
+                conv_T = build_conv_df(df_T,E_grid,energy_col=args.energy_col,
+                    intensity_col=args.intensity_col_T,vi_col=args.vi_col,sigma=args.sigma,
+                    filters=filters,normalize=False)
+
+                all_sticks_temp[temp_key][transition_label] = df_T
+                all_pop_temp[temp_key][transition_label] = pop_temp[temp_key]
+                all_conv_temp[temp_key][transition_label] = conv_T
+
+            # ------------------------------------------------
+            # State normalization
+            # ------------------------------------------------
+
+            if args.normalize and args.read_exp:
+
+                (all_conv_temp[temp_key],scale_by_state,theory_max_by_state,theory_total_by_state
+                ) = add_state_normalization_to_convs(conv_by_transition=all_conv_temp[temp_key],
+                    exp_max=exp_max)
+
+                all_scale_by_state[temp_key] = scale_by_state
+                all_theory_max_by_state[temp_key] = theory_max_by_state
+                all_theory_total_by_state[temp_key] = theory_total_by_state
+
+            # ------------------------------------------------
+            # Write output files
+            # ------------------------------------------------
+
+            for transition_label, conv_T in all_conv_temp[temp_key].items():
+                safe_label = safe_filename_label(transition_label)
+                output_file = (args.output_dir /f"{safe_label}_Tvib{Tvib:g}_Trot{Trot:g}.dat")
+
+                if args.normalize and args.read_exp:
+                    conv_write = conv_T.copy()
+                    conv_write["spec"] = conv_T["spec_state_norm"]
+                    conv_write["by_vi"] = conv_T["by_vi_state_norm"]
+                else:
+                    conv_write = conv_T
+
+                write_conv_file_one_transition_temperature(output_file=output_file,conv=conv_write,
+                    E_grid=E_grid,transition_label=transition_label,Tvib=Tvib,Trot=Trot)
+
+    return {
+        "args": args,
+        "E_grid": E_grid,
+        "transitions_df": transitions_df,
+        "exp_data": exp_data,
+        "exp_max": exp_max,
+        "all_sticks_temp": all_sticks_temp,
+        "all_pop_temp": all_pop_temp,
+        "all_conv_temp": all_conv_temp,
+        "all_scale_by_state": all_scale_by_state,
+        "all_theory_max_by_state": all_theory_max_by_state,
+        "all_theory_total_by_state": all_theory_total_by_state,
+    }
+
+if __name__ == "__main__":
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("input_file")
+
+    cli_args = parser.parse_args()
+
+    results = main(cli_args.input_file)
