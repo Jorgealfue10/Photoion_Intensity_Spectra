@@ -4,8 +4,19 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import argparse
 
-
+#---------------------------------------------------------------------------------------
+# Reading photoion sticks spectra
+#---------------------------------------------------------------------------------------
 def read_transition_output_df(filepath,skiprows=1,transition_cols=None):
+    """
+    Params:
+    filepath: str or Path - Output file containing state-to-strate intensities
+    skiprows: int - Skiprows if there is any header in filepath
+    transition_cols: list - Column names and attr
+
+    Returns:
+    df: pandas df - Contains all state-to-state transitions' info
+    """
 
     if transition_cols is None:
         transition_cols = [
@@ -46,10 +57,26 @@ def read_transition_output_df(filepath,skiprows=1,transition_cols=None):
 
     return df
 
+#---------------------------------------------------------------------------------------
+# Convolution functions
+#---------------------------------------------------------------------------------------
+
+# Stick-centered gaussian function
 def gaussian(E,E0,sigma):
     return np.exp(-(E-E0)**2/(2.0*sigma**2))
 
+# Convolve lines in a fixed grid
 def convolve_lines(E_grid,E_lines,I_lines,sigma=0.025):
+    """
+    Params: 
+    E_grid: list or np.ndarray - Constant energy grid for every transition
+    E_lines: df, list or np.ndarray - State-to-state transitions energies
+    I_lines: df, list or np.ndarray - State-to-state transitions intensities
+    sigma: float - gaussian half-width
+
+    Returns:
+    spec: np.ndarray - Convolve transition in E_grid energies
+    """
     spec = np.zeros_like(E_grid,dtype=float)
 
     for E0,I0 in zip(E_lines,I_lines):
@@ -57,15 +84,27 @@ def convolve_lines(E_grid,E_lines,I_lines,sigma=0.025):
 
     return spec
 
+# Convolution of all line transitions and sum over the whole E_grid
 def build_conv_df(df,E_grid,energy_col="Delta_eV",intensity_col="matrix_coh_sum_abs",
     vi_col="v_i",sigma=0.025,filters=None,normalize=False):
-    
+    """
+    Params: 
+    df: pandas df - transitions dataframe
+    E_grid: list or np.ndarray - constant energy grid for every transition
+    energy_col: str - energy column in df
+    intensity_col: str - intensity column in df
+    vi_col: str - initial vibrational level column in df 
+    sigma: float - convolution gaussian half-width 
+    filters: mask - considering  quantum number parameters
+    normalize: boolean - normalization of spectrum
+
+    Returns:
+    dict - contains total convoluted spectra and vi-level convolution
+    """
+
     data = df.copy()
 
-    # ========================================================
     # Apply filters
-    # ========================================================
-
     if filters is not None:
         mask = np.ones(len(data), dtype=bool)
 
@@ -82,10 +121,7 @@ def build_conv_df(df,E_grid,energy_col="Delta_eV",intensity_col="matrix_coh_sum_
 
         data = data.loc[mask].copy()
 
-    # ========================================================
     # Keep finite lines inside E_grid
-    # ========================================================
-
     E_lines_all = data[energy_col].to_numpy(dtype=float)
     I_lines_all = data[intensity_col].to_numpy(dtype=float)
 
@@ -101,10 +137,7 @@ def build_conv_df(df,E_grid,energy_col="Delta_eV",intensity_col="matrix_coh_sum_
     E_lines_all = data[energy_col].to_numpy(dtype=float)
     I_lines_all = data[intensity_col].to_numpy(dtype=float)
 
-    # ========================================================
     # Normalize input intensities if desired
-    # ========================================================
-
     if normalize:
         max_I = np.max(np.abs(I_lines_all)) if len(I_lines_all) > 0 else 0.0
 
@@ -114,24 +147,14 @@ def build_conv_df(df,E_grid,energy_col="Delta_eV",intensity_col="matrix_coh_sum_
 
     data["_I_conv"] = I_lines_all
 
-    # ========================================================
     # Total convolution
-    # ========================================================
-
-    spec = convolve_lines(
-        E_grid=E_grid,
-        E_lines=E_lines_all,
-        I_lines=I_lines_all,
-        sigma=sigma,
-    )
+    spec = convolve_lines(E_grid=E_grid,E_lines=E_lines_all,
+        I_lines=I_lines_all,sigma=sigma)
 
     spec_max = np.max(spec) if len(spec) > 0 else 0.0
     spec_area = np.trapz(spec, E_grid) if len(spec) > 0 else 0.0
 
-    # ========================================================
     # Convolution by v_i
-    # ========================================================
-
     vi_values = sorted(data[vi_col].unique())
 
     by_vi = {}
@@ -140,18 +163,13 @@ def build_conv_df(df,E_grid,energy_col="Delta_eV",intensity_col="matrix_coh_sum_
     area_by_vi = {}
 
     for vi in vi_values:
-
         sub = data[data[vi_col] == vi].copy()
 
         E_lines_vi = sub[energy_col].to_numpy(dtype=float)
         I_lines_vi = sub["_I_conv"].to_numpy(dtype=float)
 
-        spec_vi = convolve_lines(
-            E_grid=E_grid,
-            E_lines=E_lines_vi,
-            I_lines=I_lines_vi,
-            sigma=sigma,
-        )
+        spec_vi = convolve_lines(E_grid=E_grid,E_lines=E_lines_vi,
+            I_lines=I_lines_vi,sigma=sigma)
 
         by_vi[vi] = spec_vi
         sticks_by_vi[vi] = sub
@@ -159,10 +177,7 @@ def build_conv_df(df,E_grid,energy_col="Delta_eV",intensity_col="matrix_coh_sum_
         max_by_vi[vi] = np.max(spec_vi) if len(spec_vi) > 0 else 0.0
         area_by_vi[vi] = np.trapz(spec_vi, E_grid) if len(spec_vi) > 0 else 0.0
 
-    # ========================================================
     # Return
-    # ========================================================
-
     return {
         "spec": spec,"spec_max": spec_max,"spec_area": spec_area,
         "by_vi": by_vi,"vi_values": vi_values,"sticks_by_vi": sticks_by_vi,
@@ -172,16 +187,41 @@ def build_conv_df(df,E_grid,energy_col="Delta_eV",intensity_col="matrix_coh_sum_
         "vi_col": vi_col,"sigma": sigma,"filters": filters,"normalize": normalize,
     }
 
+#-------------------------------------------------------------------------------------------
+# Boltzmann distribution ; Temp effect
+#-------------------------------------------------------------------------------------------
+
+# Vibrational energy values @ J = 0
 def get_vib_energies_df(df,vi_col="v_i",Ei_col="Ei_eV"):
+    """
+    Params: 
+    df: pandas df - transitions df
+    vi_col: str - initial vib level column in df
+    Ei_col: str - initial rovib lvl E column in df
 
+    Returns:
+    Evib: dict - E by vib level
+    E0: list - min E in vibrational levels
+    """
     Evib = (df.groupby(vi_col)[Ei_col].min().to_dict())
-
     E0 = min(Evib.values())
-
     return Evib, E0
 
+# Rovibrational every values
 def get_rot_energies_df(df,vi_col="v_i",Ji_col="J_i",Omi_col="Omega_i",Ei_col="Ei_eV"):
+    """
+    Params: 
+    df: pandas df - transitions df
+    vi_col: str - init vib level column in df
+    Ji_col: str - init rotvib level column in df
+    Omi_col: str - init omega level column in df
+    Ei_col: str - init rovib level E column in df
 
+    Returns:
+    Erot: dict - rovibrational levels energies by v,J,Om
+    Evib: dict - vibrational levels energies by v
+    E0: list - min energies for vib levels
+    """
     Evib,E0 = get_vib_energies_df(df,vi_col,Ei_col)
 
     Erot = {}
@@ -199,7 +239,24 @@ def get_rot_energies_df(df,vi_col="v_i",Ji_col="J_i",Omi_col="Omega_i",Ei_col="E
     
     return Erot,Evib,E0
 
+# Computing transition intensities Tvib and Trot dependent
 def thermal_populations_df(df,Tvib,Trot,vi_col="v_i",Ji_col="J_i",Omi_col="Omega_i",Ei_col="Ei_eV"):
+    """
+    Params: 
+    df: pandas df - transitions df
+    Tvib: float - vibrational Temp
+    Trot: float - rotational Temp
+    vi_col: str - init vib level column
+    Ji_col: str - init rot level column
+    Omi_col: str - init Omega level column
+    Ei_col: str - init rovib level E value column
+
+    Returns:
+    Pvib: dict - Boltzmann pop by vib level (v)
+    Prot: dict - Boltzmann pop by rovib level (J,Om)
+    pop_dat: dict - Info about thermal contribution
+    """
+    
     kB_eV = 8.61733326145e-5 #eV/K
 
     Erot,Evib,E0 = get_rot_energies_df(df,vi_col,Ji_col,Omi_col,Ei_col)
@@ -243,8 +300,24 @@ def thermal_populations_df(df,Tvib,Trot,vi_col="v_i",Ji_col="J_i",Omi_col="Omega
 
     return Pvib, Prot, pop_data
 
+# Applying thermal pop to transition intensities
 def sticks_by_temp_df(df,Tvib_values,Trot_values,Ei_col="Ei_eV",
             vi_col="v_i",Ji_col="J_i",Omi_col="Omega_i",intensity_cols=("matrix_coh_sum_abs",)):
+    """
+    Params: 
+    df: pandas df - transition df
+    Tvib_values: list - vibrational temp values
+    Trot_values: list - rotrational temp values
+    vi_col: str - init vib level column
+    Ji_col: str - init rot level column
+    Omi_col: str - init Omega level column
+    Ei_col: str - init rovib level E value column
+    intensity_cols: str - transition intensity column 
+
+    Returns: 
+    sticks_temp: dict - thermal distributed sticks transitions
+    pop_temp: dict - thermal information
+    """
 
     sticks_temp = {} ; pop_temp = {}
 
@@ -275,18 +348,26 @@ def sticks_by_temp_df(df,Tvib_values,Trot_values,Ei_col="Ei_eV",
     
     return sticks_temp, pop_temp
 
+#-----------------------------------------------------------------------------------
+# File management
+#-----------------------------------------------------------------------------------
 def safe_filename_label(label):
-    return (
-        label
-        .replace(" -> ", "_to_")
-        .replace(" ", "")
-        .replace("+", "p")
-        .replace("/", "")
-    )
+    return (label.replace(" -> ", "_to_").replace(" ", "").replace("+", "p").replace("/", ""))
 
-
+# Writing output - convoluted spectra
 def write_conv_file_one_transition_temperature(output_file,conv,E_grid,
                                         transition_label=None,Tvib=None,Trot=None):
+    
+    """
+    Params:
+    output_file: str or path
+    conv: dict - convoluted spectra
+    E_grid: np.ndarray - 
+    transition_label: str - electronic state transition labels
+    Tvib: float - vibrational temp
+    Trot: float - rotational temp
+    """
+
     with open(output_file, "w") as f:
 
         if transition_label is not None:
@@ -410,9 +491,7 @@ def strip_inline_comment(line):
     clean = clean.split("!", 1)[0]
     return clean.strip()
 
-# ============================================================
 # Boolean parser
-# ============================================================
 def parse_bool(value):
     value = str(value).strip().lower()
     if value in ["true", "t", "yes", "y", "1", ".true."]:
@@ -421,18 +500,13 @@ def parse_bool(value):
         return False
     raise ValueError(f"Cannot parse boolean value: {value}")
 
-# ============================================================
 # Generic parsers
-# ============================================================
 def parse_float_list(values):
     return [float(v) for v in values]
-
 def parse_int_list(values):
     return [int(v) for v in values]
 
-# ============================================================
 # Read input file
-# ============================================================
 def read_input_file(filename):
     filename = Path(filename)
     data = {}
@@ -453,9 +527,7 @@ def read_input_file(filename):
             data[key] = values
     return data
 
-# ============================================================
 # Access keywords
-# ============================================================
 def get_required(data, key):
     key = key.lower().replace("-", "_")
     if key not in data:
@@ -466,10 +538,7 @@ def get_optional(data, key, default):
     key = key.lower().replace("-", "_")
     return data.get(key, default)
 
-# ============================================================
 # Convert input dictionary to argparse.Namespace
-# ============================================================
-
 def input_data_to_namespace(data):
     args = argparse.Namespace()
 
