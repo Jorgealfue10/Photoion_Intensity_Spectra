@@ -628,10 +628,11 @@ def rotational_factor_cached(J_i, J_f, Omega_i, Omega_f, K_values_tuple):
             continue
 
         for dOmega in np.arange(-K, K + 1.0, 1.0):
-            if not np.isclose(Omega_i + Omega_f - dOmega, 0.0):
+            if not np.isclose(Omega_i + dOmega - Omega_f, 0.0):
                 continue
 
-            total += W3_exp(J_i, J_f, K, Omega_i, Omega_f, -dOmega )
+            #total += W3_exp(J_i, J_f, K, Omega_i, Omega_f, -dOmega )
+            total += W3_exp(J_i, K, J_f, Omega_i, dOmega, -Omega_f)
 
     return total
 
