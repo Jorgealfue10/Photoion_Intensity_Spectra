@@ -501,8 +501,8 @@ def combine_dyson_by_omega(raw, mode="quadrature"):
     Returns: 
     combined: dict - dyson norm values combined by same number of omega combination
     """
-    if mode not in ["quadrature", "sum"]:
-        raise ValueError("mode must be 'quadrature' or 'sum'")
+    if mode not in ["quadrature", "sum","subs"]:
+        raise ValueError("mode must be 'quadrature', 'sum' or 'subs'")
 
     accum = defaultdict(lambda: None)
     sources = defaultdict(list)
@@ -525,9 +525,19 @@ def combine_dyson_by_omega(raw, mode="quadrature"):
                 sources[key].append(item["file"])
 
                 if accum[key] is None:                                                              # Accumulating the dyson norms:
-                    accum[key] = dyson**2 if mode == "quadrature" else dyson.copy()                 # either quadrature : sum(dyson**2) 
+                    if mode == "quadrature":
+                        accum[key] = dyson**2
+                    elif mode == "sum":
+                        accum[key] = dyson.copy()
+                    else:
+                        accum[key] = dyson.copy()
                 else:                                                                               # or sum of the dyson norms on the combination of omega values
-                    accum[key] += dyson**2 if mode == "quadrature" else dyson
+                    if mode == "quadrature":
+                        accum[key] += dyson**2
+                    elif mode == "sum":
+                        accum[key] += dyson
+                    else:
+                        accum[key] = dyson
 
     combined = {}
     for key, val in accum.items():
@@ -618,10 +628,11 @@ def rotational_factor_cached(J_i, J_f, Omega_i, Omega_f, K_values_tuple):
             continue
 
         for dOmega in np.arange(-K, K + 1.0, 1.0):
-            if not np.isclose(Omega_i + Omega_f - dOmega, 0.0):
+            if not np.isclose(Omega_i + dOmega - Omega_f, 0.0):
                 continue
 
-            total += W3_exp(J_i, J_f, K, Omega_i, Omega_f, -dOmega )
+            #total += W3_exp(J_i, J_f, K, Omega_i, Omega_f, -dOmega )
+            total += W3_exp(J_i, K, J_f, Omega_i, dOmega, -Omega_f)
 
     return total
 
@@ -1106,8 +1117,8 @@ def input_data_to_namespace(data):
     if len(args.states) != 2:
         raise ValueError("states must have exactly 2 values: neutral cation")
 
-    if args.dyson_mode not in ["quadrature", "sum"]:
-        raise ValueError("dyson_mode must be 'quadrature' or 'sum'")
+    if args.dyson_mode not in ["quadrature", "sum", "subs"]:
+        raise ValueError("dyson_mode must be 'quadrature', 'sum' or 'subs'")
     if args.spline not in ["cubic", "linear"]:
         raise ValueError("spline must be 'cubic' or 'linear'")
     if args.missing_dyson not in ["skip", "error"]:
